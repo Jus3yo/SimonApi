@@ -38,6 +38,27 @@ async function findCompany(idOrDomain) {
   return Object.values(db.companies).find((c) => c.domain === key) || null;
 }
 
+// Records carrying the given tags (case-insensitive, exact match on each tag).
+// match 'all' needs every tag, 'any' needs at least one. Returns null if idOrDomain is unknown.
+async function searchRecords(tags, { idOrDomain, match = 'all' } = {}) {
+  let companies;
+  if (idOrDomain) {
+    const company = await findCompany(idOrDomain);
+    if (!company) return null;
+    companies = [company];
+  } else {
+    companies = Object.values((await load()).companies);
+  }
+  const wanted = tags.map((t) => t.trim().toLowerCase());
+  const test = match === 'any' ? 'some' : 'every';
+  return companies.flatMap((c) =>
+    c.records.filter((r) => {
+      const have = new Set(r.tag.map((t) => t.toLowerCase()));
+      return wanted[test]((t) => have.has(t));
+    })
+  );
+}
+
 async function listCompanies() {
   const db = await load();
   return Object.values(db.companies).map(({ records, ...summary }) => ({
@@ -46,4 +67,4 @@ async function listCompanies() {
   }));
 }
 
-module.exports = { saveCompany, findCompany, listCompanies, DB_PATH };
+module.exports = { saveCompany, findCompany, searchRecords, listCompanies, DB_PATH };
