@@ -1,0 +1,215 @@
+openapi: 3.1.0
+info:
+  title: Simon API
+  version: 1.0.0
+  description: Information server for Simon's job application. Crawl a company's website into a local JSON database, then read the stored pages back through a read-only API.
+servers:
+  - url: http://localhost:3000
+    description: Local
+tags:
+  - name: Crawler
+    description: Crawl a domain and store one record per page.
+  - name: Results
+    description: Read-only access to stored records.
+paths:
+  /simonapi/crawl:
+    post:
+      tags:
+        - Crawler
+      summary: Crawl a domain and store the results
+      description: Starts at the domain's home page and follows same-site links breadth-first until `maxPages` pages are stored. The request waits until the crawl finishes. Re-crawling a company replaces its stored records.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CrawlRequest"
+            example:
+              domain: grantthornton.com
+              companyId: gram
+              companyName: Grant Thornton
+              maxPages: 50
+      responses:
+        "201":
+          description: Crawl finished and the records were stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlSummary"
+              example:
+                companyId: gram
+                companyName: Grant Thornton
+                domain: grantthornton.com
+                pagesStored: 10
+                failedPages: 0
+                results: /simonapi/company/gram
+        "400":
+          description: "`domain` is missing, not a string, or not a valid domain."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: Body must include a "domain" string, e.g. {"domain":"grantthornton.com"}
+        "500":
+          description: Unexpected server error.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "502":
+          description: No pages could be fetched from the domain. Nothing is stored.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CrawlFailure"
+  /simonapi/company:
+    get:
+      tags:
+        - Results
+      summary: List crawled companies
+      description: Every stored company with its page count and crawl time. Returns `[]` when nothing has been crawled.
+      responses:
+        "200":
+          description: List of companies.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CompanySummary"
+              example:
+                - companyId: gram
+                  companyName: Grant Thornton
+                  domain: grantthornton.com
+                  crawledAt: 2026-10-04T19:04:10.512Z
+                  pageCount: 10
+  /simonapi/company/{id}:
+    get:
+      tags:
+        - Results
+      summary: Get stored pages for a company
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The `companyId` (e.g. `gram`) or the crawled domain (e.g. `grantthornton.com`; a leading `www.` is ignored).
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Array of page records.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PageRecord"
+              example:
+                - url: https://grantthornton.com/about-us/sustainability
+                  title: Sustainability, built into how we operate
+                  tag:
+                    - about
+                    - sustainability
+                    - company information
+                  companyId: gram
+                  companyName: Grant Thornton
+        "404":
+          description: The company hasn't been crawled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error: No results for "acme". Crawl it first via POST /simonapi/crawl.
+components:
+  schemas:
+    CrawlRequest:
+      type: object
+      required:
+        - domain
+      properties:
+        domain:
+          type: string
+          description: Domain or URL to crawl, e.g. `grantthornton.com` or `https://www.grantthornton.com`. HTTPS is used unless the value starts with `http://`.
+        companyId:
+          type: string
+          description: Key to store the results under. Defaults to the first part of the domain (`grantthornton`).
+        companyName:
+          type: string
+          description: Display name. Defaults to the site's `og:site_name`, else the suffix of the home page `<title>`.
+        maxPages:
+          type: integer
+          minimum: 1
+          maximum: 500
+          default: 50
+          description: Maximum number of pages to store (capped at 500).
+    CrawlSummary:
+      type: object
+      properties:
+        companyId:
+          type: string
+        companyName:
+          type: string
+        domain:
+          type: string
+        pagesStored:
+          type: integer
+        failedPages:
+          type: integer
+          description: Pages that errored or timed out (10s each).
+        results:
+          type: string
+          description: Path to fetch the stored records.
+    CrawlFailure:
+      type: object
+      properties:
+        error:
+          type: string
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              error:
+                type: string
+    CompanySummary:
+      type: object
+      properties:
+        companyId:
+          type: string
+        companyName:
+          type: string
+        domain:
+          type: string
+        crawledAt:
+          type: string
+          format: date-time
+        pageCount:
+          type: integer
+    PageRecord:
+      type: object
+      properties:
+        url:
+          type: string
+          format: uri
+          description: Page URL without query string or fragment.
+        title:
+          type: string
+          description: Page title with the site-name suffix removed.
+        tag:
+          type: array
+          items:
+            type: string
+          description: "Up to two path segments plus any matching group: `home`, `company information`, `careers`, `contact`, `news`, `services`, `legal`."
+        companyId:
+          type: string
+        companyName:
+          type: string
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
