@@ -51,6 +51,24 @@ app.get('/simonapi/company', async (_req, res) => {
   res.json(await db.listCompanies());
 });
 
+// Search stored pages by tag. Registered before /company/:id so "search" isn't taken as an id.
+// GET /simonapi/company/search?tags=about,company information[&companyId=gram][&match=all|any]
+app.get('/simonapi/company/search', async (req, res) => {
+  const { tags, tag, companyId, match = 'all' } = req.query;
+  const list = [tags, tag].flat().filter((v) => typeof v === 'string').flatMap((v) => v.split(','));
+  const wanted = list.map((t) => t.trim()).filter(Boolean);
+  if (wanted.length === 0) {
+    return res.status(400).json({ error: 'Pass at least one tag, e.g. ?tags=about,company information' });
+  }
+  if (match !== 'all' && match !== 'any') {
+    return res.status(400).json({ error: 'match must be "all" or "any"' });
+  }
+  const id = typeof companyId === 'string' && companyId.trim() ? companyId.trim() : undefined;
+  const records = await db.searchRecords(wanted, { idOrDomain: id, match });
+  if (!records) return res.status(404).json({ error: `No results for "${id}". Crawl it first via POST /simonapi/crawl.` });
+  res.json(records);
+});
+
 // :id is the companyId, or the domain that was crawled.
 app.get('/simonapi/company/:id', async (req, res) => {
   const company = await db.findCompany(req.params.id);
